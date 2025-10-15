@@ -38,6 +38,10 @@
 #include "utils.h"
 
 #include "ssmem.h"
+#include "shm_alloc.h"
+
+
+extern __thread ssmem_allocator_t* clht_alloc;
 
 #define true 1
 #define false 0
@@ -97,7 +101,7 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) bucket_s
   clht_lock_t lock;
   clht_addr_t key[ENTRIES_PER_BUCKET];
   clht_val_t  val[ENTRIES_PER_BUCKET];
-  struct bucket_s* next;
+  shm_offt next; // struct bucket_s
 } bucket_t;
 
 typedef struct ALIGNED(CACHE_LINE_SIZE) clht
@@ -106,7 +110,7 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht
   {
     struct
     {
-      struct clht_hashtable_s* ht;
+      shm_offt ht; // struct clht_hashtable_s
       uint8_t next_cache_line[CACHE_LINE_SIZE - (sizeof(void*))];
     };
     uint8_t padding[2 * CACHE_LINE_SIZE];
@@ -120,11 +124,26 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht_hashtable_s
     struct
     {
       size_t num_buckets;
-      bucket_t* table;
+      shm_offt table; // bucket_t
     };
     uint8_t padding[1 * CACHE_LINE_SIZE];
   };
 } clht_hashtable_t;
+
+typedef struct ALIGNED(CACHE_LINE_SIZE) ht_ts
+{
+  union
+  {
+    struct
+    {
+      size_t version;
+      clht_hashtable_t* versionp;
+      int id;
+      volatile struct ht_ts* next;
+    };
+    uint8_t padding[CACHE_LINE_SIZE];
+  };
+} ht_ts_t;
 
 static inline void
 _mm_pause_rep(uint64_t w)
@@ -174,7 +193,7 @@ _mm_pause_rep(uint64_t w)
   *lock = 0;	  
 
 /* Create a new hashtable. */
-clht_hashtable_t* clht_hashtable_create(uint64_t num_buckets );
+shm_offt clht_hashtable_create(uint64_t num_buckets ); // clht_hashtable_t
 clht_t* clht_create(uint64_t num_buckets);
 
 /* Hash a key for a particular hashtable. */

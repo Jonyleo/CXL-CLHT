@@ -35,6 +35,8 @@
 
 #include "clht_lb.h"
 
+#include "shm_alloc.h"
+
 __thread ssmem_allocator_t* clht_alloc;
 
 #ifdef DEBUG
@@ -84,13 +86,15 @@ __ac_Jenkins_hash_64(uint64_t key)
 bucket_t*
 clht_bucket_create() 
 {
-  bucket_t* bucket = NULL;
-  bucket = memalign(CACHE_LINE_SIZE, sizeof(bucket_t));
-  /* bucket = malloc(sizeof(bucket_t)); */
-  if (bucket == NULL)
+  shm_offt bucket_off = SHM_NULL;
+  bucket_off = shm_malloc(sizeof(bucket_t));
+  if (bucket_off == SHM_NULL)
     {
+      printf("** shm_malloc @ clht_bucket_create\n");
       return NULL;
     }
+
+  bucket_t* bucket = SHM_OFFT_TO_ADDR(bucket_off);
 
   bucket->lock = 0;
 
@@ -99,7 +103,7 @@ clht_bucket_create()
     {
       bucket->key[j] = 0;
     }
-  bucket->next = NULL;
+  bucket->next = SHM_NULL;
     
   return bucket;
 }
@@ -107,66 +111,74 @@ clht_bucket_create()
 clht_t* 
 clht_create(uint64_t num_buckets)
 {
-  clht_t* w = (clht_t*) memalign(CACHE_LINE_SIZE, sizeof(clht_t));
-  if (w == NULL)
+  shm_offt w_off = SHM_NULL;
+  w_off = shm_malloc(sizeof(clht_t));
+  if (w_off == SHM_NULL)
     {
-      printf("** malloc @ hatshtalbe\n");
+      printf("** shm_malloc @ clht_create\n");
       return NULL;
     }
 
+  clht_t* w = (clht_t*) SHM_OFFT_TO_ADDR(w_off);
+  
   w->ht = clht_hashtable_create(num_buckets);
-  if (w->ht == NULL)
+  if (w->ht == SHM_NULL)
     {
-      free(w);
+      shm_free(w_off);
       return NULL;
     }
 
   return w;
 }
 
-clht_hashtable_t* 
+shm_offt
 clht_hashtable_create(uint64_t num_buckets) 
 {
   clht_hashtable_t* hashtable = NULL;
     
   if (num_buckets == 0)
     {
-      return NULL;
+      return SHM_NULL;
     }
     
   /* Allocate the table itself. */
-  hashtable = (clht_hashtable_t*) memalign(CACHE_LINE_SIZE, sizeof(clht_hashtable_t));
-  if (hashtable == NULL) 
+  shm_offt hashtable_off = SHM_NULL;
+  hashtable_off = shm_malloc(sizeof(clht_hashtable_t));
+  if (hashtable_off == SHM_NULL) 
     {
-      printf("** malloc @ hatshtalbe\n");
-      return NULL;
-    }
-    
-  /* hashtable->table = calloc(num_buckets, (sizeof(bucket_t))); */
-  hashtable->table = (bucket_t*) memalign(CACHE_LINE_SIZE, num_buckets * (sizeof(bucket_t)));
-  if (hashtable->table == NULL) 
-    {
-      printf("** alloc: hashtable->table\n"); fflush(stdout);
-      free(hashtable);
-      return NULL;
+      printf("** shm_malloc @ clht_hashtable_create hashtable\n");
+      return SHM_NULL;
     }
 
-  memset(hashtable->table, 0, num_buckets * (sizeof(bucket_t)));
+  hashtable = (clht_hashtable_t*) SHM_OFFT_TO_ADDR(hashtable_off);
+
+
+  hashtable->table =  shm_malloc(num_buckets * (sizeof(bucket_t)));
+  if (hashtable->table == SHM_NULL) 
+    {
+      printf("** shm_malloc: clht_hashtable_create table\n"); 
+      shm_free(hashtable->table);
+      return SHM_NULL;
+    }
+
+  bucket_t * table = SHM_OFFT_TO_ADDR(hashtable->table);
+  
+  memset(table, 0, num_buckets * (sizeof(bucket_t)));
     
   uint64_t i;
   for (i = 0; i < num_buckets; i++)
     {
-      hashtable->table[i].lock = 0;
+      table[i].lock = 0;
       uint32_t j;
       for (j = 0; j < ENTRIES_PER_BUCKET; j++)
 	{
-	  hashtable->table[i].key[j] = 0;
+	  table[i].key[j] = 0;
 	}
     }
 
   hashtable->num_buckets = num_buckets;
     
-  return hashtable;
+  return hashtable_off;
 }
 
 /* Hash a key for a particular hash table. */
@@ -186,7 +198,7 @@ clht_val_t
 clht_get(clht_hashtable_t* hashtable, clht_addr_t key)
 {
   size_t bin = clht_hash(hashtable, key);
-  volatile bucket_t* bucket = hashtable->table + bin;
+  volatile bucket_t* bucket = SHM_OFFT_TO_ADDR(hashtable->table) + bin;
     
   uint32_t j;
   do 
@@ -210,7 +222,7 @@ clht_get(clht_hashtable_t* hashtable, clht_addr_t key)
 	    }
 	}
 
-      bucket = bucket->next;
+      bucket = SHM_OFFT_TO_ADDR(bucket->next);
     } 
   while (bucket != NULL);
   return 0;
@@ -230,7 +242,7 @@ bucket_exists(bucket_t* bucket, clht_addr_t key)
 	    }
 	}
 
-      bucket = bucket->next;
+      bucket = SHM_OFFT_TO_ADDR(bucket->next);
     } while (bucket != NULL);
   return false;
 }
@@ -240,9 +252,9 @@ bucket_exists(bucket_t* bucket, clht_addr_t key)
 int
 clht_put(clht_t* h, clht_addr_t key, clht_val_t val) 
 {
-  clht_hashtable_t* hashtable = h->ht;
+  clht_hashtable_t* hashtable = SHM_OFFT_TO_ADDR(h->ht);
   size_t bin = clht_hash(hashtable, key);
-  bucket_t* bucket = hashtable->table + bin;
+  bucket_t* bucket = ((bucket_t*) SHM_OFFT_TO_ADDR(hashtable->table)) + bin;
 
 #if defined(READ_ONLY_FAIL)
   if (bucket_exists(bucket, key))
@@ -274,17 +286,18 @@ clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 	    }
 	}
         
-      if (bucket->next == NULL)
+      if (bucket->next == SHM_NULL)
 	{
 	  if (empty == NULL)
 	    {
 	      DPP(put_num_failed_expand);
-	      bucket->next = clht_bucket_create();
-	      bucket->next->key[0] = key;
+        bucket_t* next_ptr = clht_bucket_create();
+	      bucket->next = SHM_ADDR_TO_OFFT(next_ptr);
+	      next_ptr->key[0] = key;
 #ifdef __tile__
 	      _mm_sfence();
 #endif
-	      bucket->next->val[0] = val;
+	      next_ptr->val[0] = val;
 	    }
 	  else 
 	    {
@@ -299,7 +312,7 @@ clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 	  return true;
 	}
 
-      bucket = bucket->next;
+      bucket = SHM_OFFT_TO_ADDR(bucket->next);
     } while (true);
 }
 
@@ -309,9 +322,9 @@ clht_put(clht_t* h, clht_addr_t key, clht_val_t val)
 clht_val_t
 clht_remove(clht_t* h, clht_addr_t key)
 {
-  clht_hashtable_t* hashtable = h->ht;
+  clht_hashtable_t* hashtable = SHM_OFFT_TO_ADDR(h->ht);
   size_t bin = clht_hash(hashtable, key);
-  bucket_t* bucket = hashtable->table + bin;
+  bucket_t* bucket = ((bucket_t *) SHM_OFFT_TO_ADDR(hashtable->table)) + bin;
 
 #if defined(READ_ONLY_FAIL)
   if (!bucket_exists(bucket, key))
@@ -336,7 +349,7 @@ clht_remove(clht_t* h, clht_addr_t key)
 	      return val;
 	    }
 	}
-      bucket = bucket->next;
+      bucket = SHM_OFFT_TO_ADDR(bucket->next);
     } while (bucket != NULL);
   LOCK_RLS(lock);
   return false;
@@ -345,7 +358,7 @@ clht_remove(clht_t* h, clht_addr_t key)
 static uint32_t
 clht_put_seq(clht_hashtable_t* hashtable, clht_addr_t key, clht_val_t val, uint64_t bin) 
 {
-  bucket_t* bucket = hashtable->table + bin;
+  bucket_t* bucket = ((bucket_t*) SHM_OFFT_TO_ADDR(hashtable->table)) + bin;
   clht_addr_t* empty = NULL;
   clht_val_t* empty_v = NULL;
   uint32_t j;
@@ -365,14 +378,15 @@ clht_put_seq(clht_hashtable_t* hashtable, clht_addr_t key, clht_val_t val, uint6
 	    }
 	}
         
-      if (bucket->next == NULL)
+      if (bucket->next == SHM_NULL)
 	{
 	  if (empty == NULL)
 	    {
 	      DPP(put_num_failed_expand);
-	      bucket->next = clht_bucket_create();
-	      bucket->next->key[0] = key;
-	      bucket->next->val[0] = val;
+        bucket_t* next_ptr = clht_bucket_create();
+	      bucket->next = SHM_ADDR_TO_OFFT(next_ptr);
+	      next_ptr->key[0] = key;
+	      next_ptr->val[0] = val;
 	    }
 	  else 
 	    {
@@ -382,7 +396,7 @@ clht_put_seq(clht_hashtable_t* hashtable, clht_addr_t key, clht_val_t val, uint6
 	  return true;
 	}
 
-      bucket = bucket->next;
+      bucket = SHM_OFFT_TO_ADDR(bucket->next);
     } while (true);
 }
 
@@ -404,7 +418,7 @@ bucket_cpy(bucket_t* bucket, clht_hashtable_t* ht_new)
 	      clht_put_seq(ht_new, key, val, bin);
 	    }
 	}
-      bucket = bucket->next;
+      bucket = SHM_OFFT_TO_ADDR(bucket->next);
     } while (bucket != NULL);
 
 }
@@ -412,8 +426,8 @@ bucket_cpy(bucket_t* bucket, clht_hashtable_t* ht_new)
 void
 clht_destroy(clht_hashtable_t* hashtable)
 {
-  free(hashtable->table);
-  free(hashtable);
+  shm_free(hashtable->table);
+  shm_free(SHM_ADDR_TO_OFFT(hashtable));
 }
 
 
@@ -428,7 +442,7 @@ clht_size(clht_hashtable_t* hashtable)
   uint64_t bin;
   for (bin = 0; bin < num_buckets; bin++)
     {
-      bucket = hashtable->table + bin;
+      bucket = ((bucket_t*) SHM_OFFT_TO_ADDR(hashtable->table)) + bin;
        
       uint32_t j;
       do
@@ -441,7 +455,7 @@ clht_size(clht_hashtable_t* hashtable)
 		}
 	    }
 
-	  bucket = bucket->next;
+	  bucket = SHM_OFFT_TO_ADDR(bucket->next);
 	}
       while (bucket != NULL);
     }
@@ -459,7 +473,7 @@ clht_print(clht_hashtable_t* hashtable)
   uint64_t bin;
   for (bin = 0; bin < num_buckets; bin++)
     {
-      bucket = hashtable->table + bin;
+      bucket = ((bucket_t*) SHM_OFFT_TO_ADDR(hashtable->table)) + bin;
       
       printf("[[%05d]] ", bin);
 
@@ -474,7 +488,7 @@ clht_print(clht_hashtable_t* hashtable)
 		}
 	    }
 
-	  bucket = bucket->next;
+	  bucket = SHM_OFFT_TO_ADDR(bucket->next);
 	  printf(" ** -> ");
 	}
       while (bucket != NULL);

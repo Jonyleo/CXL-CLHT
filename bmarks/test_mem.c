@@ -740,7 +740,7 @@ main(int argc, char **argv)
   printf("Sizeof   final: %10.2f KB = %10.2f MB\n", kb, mb);
 
   //  ht_status(hashtable, 0, 0, 1);			
-  clht_gc_destroy(hashtable);
+  //clht_gc_destroy(hashtable);
 
   double throughput = (putting_count_total + getting_count_total + removing_count_total) * 1000.0 / duration;
   printf("#txs %zu\t(%-10.0f\n", num_threads, throughput);

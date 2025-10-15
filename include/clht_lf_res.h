@@ -38,6 +38,13 @@
 #include "utils.h"
 
 #include "ssmem.h"
+
+
+#define MAX_ALLOC_POW2 11
+#define MIN_ALLOC_POW2 6
+
+#include "clht_shm.h"
+
 extern __thread ssmem_allocator_t* clht_alloc;
 
 #define true 1
@@ -151,8 +158,9 @@ typedef volatile struct ALIGNED(CACHE_LINE_SIZE) bucket_s
   };
   clht_addr_t key[KEY_BUCKT];
   clht_val_t  val[KEY_BUCKT];
-  volatile struct bucket_s* padding;
+  volatile SHM_off next; // struct bucket_s *
 } bucket_t;
+
 
 #if __GNUC__ > 4 && __GNUC_MINOR__ > 4
 _Static_assert (sizeof(bucket_t) % 64 == 0, "sizeof(bucket_t) == 64");
@@ -171,7 +179,7 @@ typedef volatile uint8_t clht_lock_t;
   while (unlikely(w->resize_lock == CLHT_LOCK_ACQR))	\
     {							\
       _mm_pause();					\
-      CLHT_GC_HT_VERSION_USED(w->ht);			\
+      CLHT_GC_HT_VERSION_USED(SHR_OFF_TO_PTR(w->ht));			\
     }
 
 #define CLHT_LOCK_RESIZE(w)						\
@@ -193,10 +201,10 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht
   {
     struct
     {
-      struct clht_hashtable_s* ht;
+      SHM_off ht; // struct clht_hashtable_s*
       uint8_t next_cache_line[CACHE_LINE_SIZE - (sizeof(void*))];
-      struct clht_hashtable_s* ht_oldest;
-      struct ht_ts* version_list;
+      SHM_off ht_oldest; // struct clht_hashtable_s*
+      SHM_off version_list; // struct ht_ts*
       size_t version_min;
       volatile clht_lock_t resize_lock;
       volatile clht_lock_t gc_lock;
@@ -213,13 +221,13 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht_hashtable_s
     struct
     {
       size_t num_buckets;
-      bucket_t* table;
+      SHM_off table; // bucket_t *
       size_t hash;
       size_t version;
       uint8_t next_cache_line[CACHE_LINE_SIZE - (3 * sizeof(size_t)) - (sizeof(void*))];
-      struct clht_hashtable_s* table_tmp;
-      struct clht_hashtable_s* table_prev;
-      struct clht_hashtable_s* table_new;
+      SHM_off table_tmp; // struct clht_hashtable_s* 
+      SHM_off table_prev; // struct clht_hashtable_s* 
+      SHM_off table_new; // struct clht_hashtable_s* 
       volatile uint32_t num_expands;
       union
       {
@@ -233,6 +241,21 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) clht_hashtable_s
     uint8_t padding[2*CACHE_LINE_SIZE];
   };
 } clht_hashtable_t;
+
+typedef struct ALIGNED(CACHE_LINE_SIZE) ht_ts
+{
+  union
+  {
+    struct
+    {
+      size_t version;
+      clht_hashtable_t* versionp;
+      int id;
+      volatile struct ht_ts* next;
+    };
+    uint8_t padding[CACHE_LINE_SIZE];
+  };
+} ht_ts_t;
 
 inline uint64_t __ac_Jenkins_hash_64(uint64_t key);
 
@@ -336,14 +359,14 @@ _mm_pause_rep(uint64_t w)
 /* ******************************************************************************** */
 
 /* Create a new hashtable. */
-clht_hashtable_t* clht_hashtable_create(uint64_t num_buckets);
-clht_t* clht_create(uint64_t num_buckets);
+SHM_off clht_hashtable_create(uint64_t num_buckets); // clht_hashtable_t*
+SHM_off clht_create(uint64_t num_buckets);
 
 /* Insert a key-value pair into a hashtable. */
 int clht_put(clht_t* hashtable, clht_addr_t key, clht_val_t val);
 
 /* Retrieve a key-value pair from a hashtable. */
-clht_val_t clht_get(clht_hashtable_t* hashtable, clht_addr_t key);
+clht_val_t clht_get(SHM_off hashtable, clht_addr_t key);
 
 /* Remove a key-value pair from a hashtable. */
 clht_val_t clht_remove(clht_t* hashtable, clht_addr_t key);

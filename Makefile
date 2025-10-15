@@ -48,7 +48,7 @@ endif
 
 TOP := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 
-LIBS+=-L$(TOP)/external/lib -L$(TOP)
+LIBS+=-L$(TOP)/external/lib -L$(TOP) -L$(TOP)/external/shm_alloc/src
 
 SRCPATH := $(TOP)/src
 MAININCLUDE := $(TOP)/include
@@ -61,9 +61,10 @@ endif
 # default setings
 PLATFORM=-DDEFAULT
 GCC=gcc
+BMARK_GCC=$(GCC)
 PLATFORM_NUMA=0
 OPTIMIZE=
-LIBS += -lrt -lpthread -lm  -lclht -lssmem
+LIBS += -lrt -lpthread -lm  -lclht -lssmem -lshm_alloc
 
 UNAME := $(shell uname -n)
 
@@ -151,8 +152,8 @@ CFLAGS += $(PLATFORM)
 CFLAGS += $(OPTIMIZE)
 CFLAGS += $(DEBUG_FLAGS)
 
-INCLUDES := -I$(MAININCLUDE) -I$(TOP)/external/include
-OBJ_FILES := clht_gc.o
+INCLUDES := -I$(MAININCLUDE) -I$(TOP)/external/include -I$(TOP)/external/shm_alloc/src
+OBJ_FILES := clht_gc.o clht_shm.o
 
 SRC := src
 
@@ -160,7 +161,9 @@ BMARKS := bmarks
 
 #MAIN_BMARK := $(BMARKS)/test.c     # no memory allocation
 #MAIN_BMARK := $(BMARKS)/test_ro.c  # read-only benchmark
-MAIN_BMARK := $(BMARKS)/test_mem.c  # memory allocation
+#MAIN_BMARK := $(BMARKS)/test_mem.c  # memory allocation
+MAIN_BMARK := $(BMARKS)/randuration.cpp  
+BMARK_GCC=g++
 
 ALL = 	clht_lb clht_lb_res clht_lb_res_no_next clht_lb_ro clht_lb_linked clht_lb_packed \
 	clht_lf clht_lf_res clht_lf_only_map_rem
@@ -264,27 +267,27 @@ lib$(TYPE).a: $(OBJ_FILES) $(OBJ)
 
 TYPE = clht_lb
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) -DNO_RESIZE $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb $(LIBS) -lclht
+	$(BMARK_GCC) -DNO_RESIZE $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb $(LIBS) -lclht
 
 TYPE = clht_lb_res
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) $(INCLUDES) $(CFLAGS) $(MAIN_BMARK) $(SRC)/clht_lb_res.c -o clht_lb_res $(LIBS)
+	$(BMARK_GCC) $(INCLUDES) $(CFLAGS) $(MAIN_BMARK) $(SRC)/clht_lb_res.c -o clht_lb_res $(LIBS)
 
 TYPE = clht_lb_res_no_next
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb_nn $(LIBS)
+	$(BMARK_GCC) $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb_nn $(LIBS)
 
 TYPE = clht_lb_linked
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb_linked $(LIBS)
+	$(BMARK_GCC) $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb_linked $(LIBS)
 
 TYPE = clht_lb_packed
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) $(SRC)/clht_lb_packed.c -o clht_lb_packed $(LIBS)
+	$(BMARK_GCC) $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) $(SRC)/clht_lb_packed.c -o clht_lb_packed $(LIBS)
 
 TYPE = clht_lb_lock_ins
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) -DLOCK_INS $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb_lock_ins $(LIBS)
+	$(BMARK_GCC) -DLOCK_INS $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lb_lock_ins $(LIBS)
 
 ################################################################################
 # lock-free targets
@@ -292,31 +295,31 @@ $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
 
 TYPE = clht_lf
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lf $(LIBS)
+	$(BMARK_GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lf $(LIBS)
 
 TYPE = clht_lf_res
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) -DLOCKFREE_RES $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lf_res $(LIBS)
+	$(BMARK_GCC) -DLOCKFREE_RES $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lf_res $(LIBS)
 
 TYPE = clht_lf_only_map_rem
 $(TYPE): $(MAIN_BMARK) lib$(TYPE).a
-	$(GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lf_only_map_rem $(LIBS)
+	$(BMARK_GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(MAIN_BMARK) -o clht_lf_only_map_rem $(LIBS)
 
 ################################################################################
 # other tests
 ################################################################################
 
 math_cache_lb: $(BMARKS)/math_cache.c libclht_lb_res.a
-	$(GCC) $(CFLAGS) $(INCLUDES) $(BMARKS)/math_cache.c -o math_cache_lb $(LIBS)
+	$(BMARK_GCC) $(CFLAGS) $(INCLUDES) $(BMARKS)/math_cache.c -o math_cache_lb $(LIBS)
 
 math_cache_lf: $(BMARKS)/math_cache.c libclht_lf_res.a
-	$(GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(BMARKS)/math_cache.c -o math_cache_lf $(LIBS)
+	$(BMARK_GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(BMARKS)/math_cache.c -o math_cache_lf $(LIBS)
 
 snap_stress: $(BMARKS)/snap_stress.c libclht_lf_res.a
-	$(GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(BMARKS)/snap_stress.c -o snap_stress $(LIBS)
+	$(BMARK_GCC) -DLOCKFREE $(CFLAGS) $(INCLUDES) $(BMARKS)/snap_stress.c -o snap_stress $(LIBS)
 
 noise: $(BMARKS)/noise.c $(OBJ_FILES)
-	$(GCC) $(CFLAGS) $(INCLUDES) $(OBJ_FILES) $(BMARKS)/noise.c -o noise $(LIBS)
+	$(BMARK_GCC) $(CFLAGS) $(INCLUDES) $(OBJ_FILES) $(BMARKS)/noise.c -o noise $(LIBS)
 
 
 

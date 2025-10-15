@@ -28,9 +28,13 @@
  *
  */
 
-#include "clht_lb_res.h"
+#include "clht_lf_res.h"
 #include <assert.h>
 #include <malloc.h>
+
+#include "ssmem.h"
+
+
 
 static __thread ht_ts_t* clht_ts_thread = NULL;
 
@@ -40,21 +44,27 @@ static __thread ht_ts_t* clht_ts_thread = NULL;
 void
 clht_gc_thread_init(clht_t* h, int id)
 {
+
+
   clht_alloc = (ssmem_allocator_t*) malloc(sizeof(ssmem_allocator_t));
   assert(clht_alloc != NULL);
   ssmem_alloc_init_fs_size(clht_alloc, SSMEM_DEFAULT_MEM_SIZE, SSMEM_GC_FREE_SET_SIZE, id);
 
-  ht_ts_t* ts = (ht_ts_t*) memalign(CACHE_LINE_SIZE, sizeof(ht_ts_t));
-  assert(ts != NULL);
+  SHM_off ts_off = clht_shm_alloc(sizeof(ht_ts_t));
+  assert(ts_off != SHM_NULL);
 
-  ts->version = h->ht->version;
+  ht_ts_t* ts = (ht_ts_t*) SHR_OFF_TO_PTR(ts_off);
+
+  ts->version = ((clht_hashtable_t*) SHR_OFF_TO_PTR(h->ht))->version;
   ts->id = id;
 
+  SHM_off ts_next_off; 
   do
     {
-      ts->next = h->version_list;
+      ts_next_off = h->version_list;
     }
-  while (CAS_U64((volatile size_t*) &h->version_list, (size_t) ts->next, (size_t) ts) != (size_t) ts->next);
+  while (CAS_U64((volatile size_t*) &h->version_list, (size_t) ts_next_off, (size_t) ts_off) != (size_t) ts_next_off);
+
 
   clht_ts_thread = ts;
 }
@@ -99,7 +109,7 @@ inline int
 clht_gc_collect(clht_t* hashtable)
 {
 #if CLHT_DO_GC == 1
-  CLHT_GC_HT_VERSION_USED(hashtable->ht);
+  CLHT_GC_HT_VERSION_USED((clht_hashtable_t *)SHR_OFF_TO_PTR(hashtable->ht));
   return clht_gc_collect_cond(hashtable, 1);
 #else
   return 0;
@@ -126,9 +136,9 @@ clht_gc_collect_all(clht_t* hashtable)
 size_t
 clht_gc_min_version_used(clht_t* h)
 {
-  volatile ht_ts_t* cur = h->version_list;
+  volatile ht_ts_t* cur = (volatile ht_ts_t*) SHR_OFF_TO_PTR(h->version_list);
 
-  size_t min = h->ht->version;
+  size_t min = ((clht_hashtable_t*) SHR_OFF_TO_PTR(h->ht))->version;
   while (cur != NULL)
     {
       if (cur->version < min)
@@ -150,7 +160,7 @@ static int
 clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
 {
   /* if version_min >= current version there is nothing to collect! */
-  if ((hashtable->version_min >= hashtable->ht->version) || TRYLOCK_ACQ(&hashtable->gc_lock))
+  if ((hashtable->version_min >= ((clht_hashtable_t*) SHR_OFF_TO_PTR(hashtable->ht))->version) || TRYLOCK_ACQ(&hashtable->gc_lock))
     {
       /* printf("** someone else is performing gc\n"); */
       return 0;
@@ -160,7 +170,7 @@ clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
 
   /* printf("[GCOLLE-%02d] LOCK  : %zu\n", GET_ID(collect_not_referenced_only), hashtable->version); */
 
-  size_t version_min = hashtable->ht->version; 
+  size_t version_min = ((clht_hashtable_t*) SHR_OFF_TO_PTR(hashtable->ht))->version; 
   if (collect_not_referenced_only)
     {
       version_min = clht_gc_min_version_used(hashtable);
@@ -180,20 +190,21 @@ clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
     {
       /* printf("[GCOLLE-%02d] collect from %zu to %zu\n", GET_ID(collect_not_referenced_only), hashtable->version_min, version_min); */
 
-      clht_hashtable_t* cur = hashtable->ht_oldest;
+      clht_hashtable_t* cur = (clht_hashtable_t*) SHR_OFF_TO_PTR(hashtable->ht_oldest);
+      SHM_off cur_off = hashtable->ht_oldest;
       while (cur != NULL && cur->version < version_min)
 	{
 	  gced_num++;
-	  clht_hashtable_t* nxt = cur->table_new;
+	  clht_hashtable_t* nxt = (clht_hashtable_t*) SHR_OFF_TO_PTR(cur->table_new);
 	  /* printf("[GCOLLE-%02d] gc_free version: %6zu | current version: %6zu\n", GET_ID(collect_not_referenced_only), */
 	  /* 	 cur->version, hashtable->ht->version); */
-	  nxt->table_prev = NULL;
+	  nxt->table_prev = SHM_NULL;
 	  clht_gc_free(cur);
 	  cur = nxt;
 	}
 
       hashtable->version_min = cur->version;
-      hashtable->ht_oldest = cur;
+      hashtable->ht_oldest = cur_off;
 
       TRYLOCK_RLS(hashtable->gc_lock);
       /* printf("[GCOLLE-%02d] UNLOCK: %zu\n", GET_ID(collect_not_referenced_only), cur->version); */
@@ -217,23 +228,25 @@ clht_gc_free(clht_hashtable_t* hashtable)
 #if !defined(CLHT_LB_LINKED) && !defined(LOCKFREE_RES)
   uint64_t num_buckets = hashtable->num_buckets;
   volatile bucket_t* bucket = NULL;
+  SHM_off bucket_off = SHM_NULL;
 
   uint64_t bin;
   for (bin = 0; bin < num_buckets; bin++)
     {
-      bucket = hashtable->table + bin;
-      bucket = bucket->next;
+      bucket = ((bucket_t*) SHR_OFF_TO_PTR(hashtable->table)) + bin;
+      bucket = (bucket_t*) SHR_OFF_TO_PTR(bucket->next);
+      bucket_off = SHR_PTR_TO_OFF(bucket);
+      
       while (bucket != NULL)
-	{
-	  volatile bucket_t* cur = bucket;
-	  bucket = bucket->next;
-	  free((void*) cur);
-	}
+      	{
+      	  bucket = SHR_OFF_TO_PTR(bucket->next);
+      	  clht_shm_free(bucket_off);
+      	}
     }
 #endif
 
-  free(hashtable->table);
-  free(hashtable);
+  clht_table_free(hashtable->table);
+  clht_shm_free(SHR_PTR_TO_OFF(hashtable));
 
   return 1;
 }
@@ -246,8 +259,8 @@ clht_gc_destroy(clht_t* hashtable)
 {
 #if !defined(CLHT_LINKED)
   clht_gc_collect_all(hashtable);
-  clht_gc_free(hashtable->ht);
-  free(hashtable);
+  clht_gc_free(SHR_OFF_TO_PTR(hashtable->ht));
+  clht_shm_free(SHR_PTR_TO_OFF(hashtable));
 #endif
 
   //  ssmem_alloc_term(clht_alloc);
@@ -270,18 +283,18 @@ clht_gc_release(clht_hashtable_t* hashtable)
   uint64_t bin;
   for (bin = 0; bin < num_buckets; bin++)
     {
-      bucket = hashtable->table + bin;
-      bucket = bucket->next;
+      bucket = ((bucket_t*) SHR_OFF_TO_PTR(hashtable->table)) + bin;
+      bucket = SHR_OFF_TO_PTR(bucket->next);
       while (bucket != NULL)
   	{
   	  volatile bucket_t* cur = bucket;
-  	  bucket = bucket->next;
+  	  bucket = SHR_OFF_TO_PTR(bucket->next);
   	  ssmem_release(clht_alloc, (void*) cur);
   	}
     }
 #endif
 
-  ssmem_release(clht_alloc, hashtable->table);
+  ssmem_release(clht_alloc, SHR_OFF_TO_PTR(hashtable->table));
   ssmem_release(clht_alloc, hashtable);
   return 1;
 }

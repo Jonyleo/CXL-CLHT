@@ -58,7 +58,7 @@ static void* clht_mmap_cxl(char * path, uint64_t size, int * fd_out) {
 	    return NULL;
 	}
 
-	void* res = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED_VALIDATE | MAP_SYNC, fd, 0);
+	void* res = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED_VALIDATE, fd, 0);
 	if(res == MAP_FAILED) {
 	    perror("mmap @ clht_mmap_cxl");
 	    return NULL;
@@ -83,7 +83,7 @@ static void * _clht_shm_init(char * path) {
 	comm = (struct cxl_comm *) mmap(((char*) res) + SHM_MAPPING_SIZE_ALIGNED, 
 									SHM_COMM_SIZE, 
 									PROT_READ | PROT_WRITE, 
-									MAP_SHARED_VALIDATE | MAP_SYNC | MAP_FIXED, 
+									MAP_SHARED_VALIDATE | MAP_FIXED, 
 									fd, 
 									SHM_MAPPING_SIZE_ALIGNED);
 
@@ -95,7 +95,7 @@ static void * _clht_shm_init(char * path) {
 		return NULL;
 	}
 
-	table_base = mmap(((char*) res) + SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE, SHM_TABLE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED_VALIDATE | MAP_SYNC, fd, SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE);
+	table_base = mmap(((char*) res) + SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE, SHM_TABLE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED_VALIDATE , fd, SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE);
 	if(table_base == NULL) {
 		perror("mmap @ _clht_shm_init table");
 		return NULL;

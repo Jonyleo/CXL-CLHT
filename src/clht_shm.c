@@ -7,11 +7,7 @@
 #include "shm_alloc.h"
 #include "shm_constants.h"
 
-
-#ifndef CXL_PATH
-  #define CXL_PATH "/dev/dax2.0"  
-#endif
-
+#define CXL_PATH_DEFAULT "/dev/dax2.0"  
 
 #define CXL_ALIGNEMNT (21)
 #define CXL_ALIGN_ADDR(A) (((A >> CXL_ALIGNEMNT)+1) << CXL_ALIGNEMNT)
@@ -46,6 +42,15 @@ void * shm_base = NULL;
 struct cxl_comm * comm = NULL;
 void * table_base = NULL;
 
+static char* get_cxl_path() {
+	char * cxl_path = getenv("CXL_PATH");
+
+	if(cxl_path == NULL)
+		return CXL_PATH_DEFAULT;
+
+	return cxl_path;
+}
+
 static void* clht_mmap_cxl(char * path, uint64_t size, int * fd_out) {
 	int fd;
 	if ((fd = open(path, O_RDWR, 0666)) < 0) {
@@ -67,9 +72,9 @@ static void* clht_mmap_cxl(char * path, uint64_t size, int * fd_out) {
 	return res;
 }
 
-static void * _clht_shm_init() {
+static void * _clht_shm_init(char * path) {
 	int fd = 0;
-	void * res = clht_mmap_cxl(CXL_PATH, CXL_DAX_SIZE_ALIGNED, &fd);
+	void * res = clht_mmap_cxl(path, CXL_DAX_SIZE_ALIGNED, &fd);
 
 	if(fd == 0) {
 		return NULL;
@@ -102,7 +107,9 @@ static void * _clht_shm_init() {
 
 
 void * clht_shm_init(int node, int force_init, int num_buckets) {
-	void * shm_base = _clht_shm_init();
+	char * cxl_path = get_cxl_path();
+
+	void * shm_base = _clht_shm_init(cxl_path);
 	if(shm_base == NULL) {
 		return NULL;
 	}
@@ -111,7 +118,7 @@ void * clht_shm_init(int node, int force_init, int num_buckets) {
 			memset(shm_base, 0, SHM_COMM_SIZE + SHM_MAPPING_SIZE_ALIGNED);
 		}
 
-	shm_init(shm_base, CXL_PATH);
+	shm_init(shm_base, cxl_path);
 	
     if(CAS_U8(&comm->initialized, 0, 1) == 1) {
     	while(comm->initialized != 2);

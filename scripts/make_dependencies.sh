@@ -4,6 +4,8 @@ ssmem=https://github.com/LPD-EPFL/ssmem
 ssmem_folder=./external/ssmem;
 sspfd=https://github.com/trigonak/sspfd
 sspfd_folder=./external/sspfd;
+shm_alloc_folder=./external/shm_alloc;
+
 
 if [ ! -d $ssmem_folder ];
 then
@@ -30,4 +32,10 @@ make libsspfd.a;
 cp libsspfd.a ../lib;
 cp sspfd.h ../include;
 cd -;
+
+git submodule init
+git submodule update
+cd $shm_alloc_folder/src
+make
+cd -
 

@@ -4,7 +4,7 @@ ssmem=https://github.com/LPD-EPFL/ssmem
 ssmem_folder=./external/ssmem;
 sspfd=https://github.com/trigonak/sspfd
 sspfd_folder=./external/sspfd;
-shm_alloc_folder=./external/shm_alloc;
+shm_alloc_folder=./external/shm_alloc_devdax;
 
 
 if [ ! -d $ssmem_folder ];

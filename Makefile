@@ -48,7 +48,7 @@ endif
 
 TOP := $(patsubst %/,%,$(dir $(lastword $(MAKEFILE_LIST))))
 
-LIBS+=-L$(TOP)/external/lib -L$(TOP) -L$(TOP)/external/shm_alloc/src
+LIBS+=-L$(TOP)/external/lib -L$(TOP) -L$(TOP)/external/shm_alloc_devdax/src
 
 SRCPATH := $(TOP)/src
 MAININCLUDE := $(TOP)/include
@@ -152,7 +152,7 @@ CFLAGS += $(PLATFORM)
 CFLAGS += $(OPTIMIZE)
 CFLAGS += $(DEBUG_FLAGS)
 
-INCLUDES := -I$(MAININCLUDE) -I$(TOP)/external/include -I$(TOP)/external/shm_alloc/src
+INCLUDES := -I$(MAININCLUDE) -I$(TOP)/external/include -I$(TOP)/external/shm_alloc_devdax/src
 OBJ_FILES := clht_gc.o clht_shm.o
 
 SRC := src

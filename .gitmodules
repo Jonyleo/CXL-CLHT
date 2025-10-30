@@ -1,3 +1,6 @@
 [submodule "external/shm_alloc"]
 	path = external/shm_alloc
 	url = https://github.com/MihirLuthra/shm_alloc
+[submodule "external/shm_alloc_devdax"]
+	path = external/shm_alloc_devdax
+	url = https://github.com/Jonyleo/shm_alloc_devdax

@@ -112,7 +112,6 @@ extern __thread ssmem_allocator_t* clht_alloc;
 #endif
 
 #define CAS_U64_BOOL(a, b, c) (CAS_U64(a, b, c) == b)
-inline int is_power_of_two(unsigned int x);
 
 typedef uintptr_t clht_addr_t;
 typedef volatile uintptr_t clht_val_t;
@@ -251,13 +250,11 @@ typedef struct ALIGNED(CACHE_LINE_SIZE) ht_ts
       size_t version;
       clht_hashtable_t* versionp;
       int id;
-      volatile struct ht_ts* next;
+      SHM_off next;
     };
     uint8_t padding[CACHE_LINE_SIZE];
   };
 } ht_ts_t;
-
-inline uint64_t __ac_Jenkins_hash_64(uint64_t key);
 
 /* Hash a key for a particular hashtable. */
 uint64_t clht_hash(clht_hashtable_t* hashtable, clht_addr_t key );

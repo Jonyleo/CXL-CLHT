@@ -7,8 +7,8 @@ typedef shm_offt SHM_off;
 
 #include "clht_lf_res.h"
 
-void * clht_shm_init(int node, int force_init, int num_buckets);
-void clht_shm_term(int node, int force_destroy);
+void * clht_shm_init(int node, int force_init, int num_buckets, int num_vms);
+void clht_shm_term(int node);
 
 SHM_off clht_shm_alloc(uint64_t size);
 void clht_shm_free(SHM_off off);

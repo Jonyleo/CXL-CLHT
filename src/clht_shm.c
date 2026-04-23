@@ -20,8 +20,8 @@ CXL - DAX
 */
 
 // 64GB for the hashtables
-#define SHM_TABLE_SIZE (1UL << 36) 
-// 2MB for the comms (must be aligned to 2M due to devdax restructions)
+#define SHM_TABLE_SIZE (1UL << 34) 
+// 2MB for the comms (must be aligned to 2M due to devdax restrictions)
 #define SHM_COMM_SIZE (1UL << CXL_ALIGNEMNT)
 // SHM_MAPPING_SIZE as defined by shm_alloc (aligned to 2M)
 #define SHM_MAPPING_SIZE_ALIGNED CXL_ALIGN_ADDR(SHM_MAPPING_SIZE)
@@ -36,121 +36,107 @@ struct cxl_comm {
 	_Atomic SHM_off clht;
 	_Atomic uint8_t initialized;
 	_Atomic uint64_t table_end;
+	_Atomic uint64_t connected_vms;
 };
 
 void * shm_base = NULL;
 struct cxl_comm * comm = NULL;
 void * table_base = NULL;
 
-static char* get_cxl_path() {
-	char * cxl_path = getenv("CXL_PATH");
+int read_ptr(int * ptr) { return *ptr; }
 
-	if(cxl_path == NULL)
-		return CXL_PATH_DEFAULT;
+static void * allocate(char * path, size_t size) {
+    int fd;
 
-	return cxl_path;
+    if ((fd = open(path, O_RDWR, 0)) < 0) {
+        perror("open");
+        return NULL;
+    }
+    
+    void * mmap_res = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if(mmap_res == MAP_FAILED) {
+        perror("mmap");
+        return NULL;
+    }
+
+    close(fd);
+
+    return mmap_res;
 }
 
-static void* clht_mmap_cxl(char * path, uint64_t size, int * fd_out) {
-	int fd;
-	if ((fd = open(path, O_RDWR, 0666)) < 0) {
-	    perror("open(create) @ clht_mmap_cxl");
-	    return NULL;
-	}
+static void * _clht_shm_init(int leader) {
 
-	void* res = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED_VALIDATE | MAP_SYNC, fd, 0);
+
+	void * res = (void *) allocate("/dev/mewsi", CXL_DAX_SIZE_ALIGNED);
 	if(res == MAP_FAILED) {
-	    perror("mmap @ clht_mmap_cxl");
-	    return NULL;
+		return NULL;
 	}
 
-	if(fd_out == NULL)
-		close(fd);
-	else
-		*fd_out = fd;
+	comm = (struct cxl_comm*) (((char*)res) + SHM_MAPPING_SIZE_ALIGNED);
+	table_base = ((char*)res) + SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE;
 
 	return res;
 }
 
-static void * _clht_shm_init(char * path) {
-	int fd = 0;
-	void * res = clht_mmap_cxl(path, CXL_DAX_SIZE_ALIGNED, &fd);
+void * shm_base;
 
-	if(fd == 0) {
-		return NULL;
-	}
+void * clht_shm_init(int node, int force_init, int num_buckets, int num_vms) {
+	if(shm_base)
+    	return (void*) SHR_OFF_TO_PTR(comm->clht);
 
-	comm = (struct cxl_comm *) mmap(((char*) res) + SHM_MAPPING_SIZE_ALIGNED, 
-									SHM_COMM_SIZE, 
-									PROT_READ | PROT_WRITE, 
-									MAP_SHARED_VALIDATE | MAP_SYNC | MAP_FIXED, 
-									fd, 
-									SHM_MAPPING_SIZE_ALIGNED);
-
-
-	assert((char*)comm == (((char*) res) + SHM_MAPPING_SIZE_ALIGNED));
-
-	if(comm == MAP_FAILED) {
-		perror("mmap @ _clht_shm_init comm");
-		return NULL;
-	}
-
-	table_base = mmap(((char*) res) + SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE, SHM_TABLE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED_VALIDATE | MAP_SYNC, fd, SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE);
-	if(table_base == NULL) {
-		perror("mmap @ _clht_shm_init table");
-		return NULL;
-	}
-	close(fd);
-
-	return res;
-}
-
-
-void * clht_shm_init(int node, int force_init, int num_buckets) {
-	char * cxl_path = get_cxl_path();
-
-	void * shm_base = _clht_shm_init(cxl_path);
+	shm_base = _clht_shm_init(force_init);
 	if(shm_base == NULL) {
 		return NULL;
 	}
+	shm_init(force_init, shm_base);
 
-		if(force_init) {
-			memset(shm_base, 0, SHM_COMM_SIZE + SHM_MAPPING_SIZE_ALIGNED);
-		}
-
-	shm_init(shm_base, cxl_path);
+	if(force_init) {
+		comm->initialized = 0;
+	}
 	
     if(CAS_U8(&comm->initialized, 0, 1) == 1) {
     	while(comm->initialized != 2);
     }
 
     if(comm->initialized == 1) {
-    	printf("[%d] Initilizing CLHT\n", node);
+    	printf("[%d] Initializing CLHT\n", node);
 
 		comm->table_end = 0;
     	comm->clht = clht_create(num_buckets);
 
     	comm->initialized = 2;
+    	comm->connected_vms = 1;
     } else {
     	printf("[%d] Obtaining CLHT\n", node);
+    	comm->connected_vms++;
     }
+
+    while(comm->connected_vms != num_vms);
+
+    printf("All VMs connected\n");
+
 
     return (void*) SHR_OFF_TO_PTR(comm->clht);
 }
 
 
-void clht_shm_term(int node, int force_destroy) {
+void clht_shm_term(int node) {
+	// TODO - Decide if is last node in the system. if yes destroy meta ? Should this happen?
 	shm_deinit();
-	munmap(table_base, SHM_TABLE_SIZE);
-	munmap(comm, SHM_COMM_SIZE);
 
-	if(force_destroy) {
-		memset(shm_base, 0, SHM_COMM_SIZE + SHM_MAPPING_SIZE_ALIGNED);
+	comm->connected_vms--;
+	if(comm->connected_vms == 0) {
+    	printf("All VMs disconnected\n");
 	}
+
+	munmap(shm_base, CXL_DAX_SIZE_ALIGNED);
+	shm_base = NULL;
 }
 
 SHM_off clht_shm_alloc(uint64_t size) {
-	return shm_malloc(size);
+	SHM_off res = shm_malloc(size);
+  	memset(SHR_OFF_TO_PTR(res), 0, size);
+	return res;
 }
 
 void clht_shm_free(SHM_off off) {
@@ -177,7 +163,11 @@ SHM_off clht_table_alloc(uint64_t num_buckets) {
 
 	} while(CAS_U64(&comm->table_end, old_table_end, new_table_end) != old_table_end);
 
-	return (SHM_off) (SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE + old_table_end);
+	SHM_off off = (SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE + old_table_end);
+
+  	memset ((char *)SHR_OFF_TO_PTR(off), 0, size);
+
+  	return off;
 }
 
 void clht_table_free(uint64_t num_buckets) {

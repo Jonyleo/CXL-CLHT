@@ -94,6 +94,11 @@ clht_bucket_create ()
 
   bucket_t *bucket = SHR_OFF_TO_PTR (bucket_off);
 
+
+  SHM_off bucket_off2 = SHR_PTR_TO_OFF(bucket);
+
+  printf("clht_bucket_create %ld %ld\n", bucket_off, bucket_off2);
+
   uint32_t j;
   for (j = 0; j < KEY_BUCKT; j++)
     {
@@ -157,6 +162,7 @@ clht_hashtable_create (uint64_t num_buckets)
 
   hashtable = (clht_hashtable_t *)SHR_OFF_TO_PTR (hashtable_off);
 
+
   hashtable->table = clht_table_alloc (num_buckets * (sizeof (bucket_t)));
   if (hashtable->table == SHM_NULL)
     {
@@ -166,9 +172,7 @@ clht_hashtable_create (uint64_t num_buckets)
     }
 
   bucket_t *table = SHR_OFF_TO_PTR (hashtable->table);
-
-  memset ((bucket_t *)table, 0, num_buckets * (sizeof (bucket_t)));
-
+  
   uint64_t i;
   for (i = 0; i < num_buckets; i++)
     {
@@ -296,6 +300,7 @@ retry:
         {
           if (empty_retries++ >= CLHT_NO_EMPTY_SLOT_TRIES)
             {
+
               empty_retries = 0;
               ht_status (h, 0, 2, 0);
             }
@@ -472,8 +477,10 @@ ht_resize_pes (clht_t *h, int is_increase, int by)
   do
     {
       version_min = clht_gc_min_version_used (h);
+
     }
   while (cur_version >= version_min);
+
 
   ht_new->version = cur_version + 2;
 
@@ -560,13 +567,14 @@ ht_status (clht_t *h, int resize_increase, int emergency_increase,
     }
   else
     {
-      if (full_ratio > 0 && full_ratio < CLHT_PERC_FULL_HALVE)
+      /*if (full_ratio > 0 && full_ratio < CLHT_PERC_FULL_HALVE)
         {
-          printf ("[STATUS-%02d] #bu: %7zu / #elems: %7zu / full%%: %8.4f%%\n",
+          printf ("---[STATUS-%02d] #bu: %7zu / #elems: %7zu / full%%: %8.4f%%\n",
                   clht_gc_get_id (), hashtable->num_buckets, size, full_ratio);
-          ht_resize_pes (h, 0, 33);
+          *((int *)NULL) = 0;
+          //ht_resize_pes (h, 0, 33);
         }
-      else if ((full_ratio > 0 && full_ratio > CLHT_PERC_FULL_DOUBLE)
+      else*/ if ((full_ratio > 0 && full_ratio > CLHT_PERC_FULL_DOUBLE)
                || emergency_increase || resize_increase)
         {
           int inc_by = (full_ratio / CLHT_OCCUP_AFTER_RES);

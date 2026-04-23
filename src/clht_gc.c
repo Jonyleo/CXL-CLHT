@@ -136,16 +136,19 @@ clht_gc_collect_all(clht_t* hashtable)
 size_t
 clht_gc_min_version_used(clht_t* h)
 {
-  volatile ht_ts_t* cur = (volatile ht_ts_t*) SHR_OFF_TO_PTR(h->version_list);
+  SHM_off           cur_off = h->version_list;
+  volatile ht_ts_t* cur = (volatile ht_ts_t*) SHR_OFF_TO_PTR(cur_off);
 
   size_t min = ((clht_hashtable_t*) SHR_OFF_TO_PTR(h->ht))->version;
   while (cur != NULL)
     {
       if (cur->version < min)
-	{
-	  min = cur->version;
-	}
-      cur = cur->next;
+    	{
+    	  min = cur->version;
+    	}
+      
+      cur_off = cur->next;
+      cur = (volatile ht_ts_t*) SHR_OFF_TO_PTR(cur_off);
     }
 
   return min;
@@ -193,15 +196,17 @@ clht_gc_collect_cond(clht_t* hashtable, int collect_not_referenced_only)
       clht_hashtable_t* cur = (clht_hashtable_t*) SHR_OFF_TO_PTR(hashtable->ht_oldest);
       SHM_off cur_off = hashtable->ht_oldest;
       while (cur != NULL && cur->version < version_min)
-	{
-	  gced_num++;
-	  clht_hashtable_t* nxt = (clht_hashtable_t*) SHR_OFF_TO_PTR(cur->table_new);
-	  /* printf("[GCOLLE-%02d] gc_free version: %6zu | current version: %6zu\n", GET_ID(collect_not_referenced_only), */
-	  /* 	 cur->version, hashtable->ht->version); */
-	  nxt->table_prev = SHM_NULL;
-	  clht_gc_free(cur);
-	  cur = nxt;
-	}
+    	{
+    	  gced_num++;
+    	  clht_hashtable_t* nxt = (clht_hashtable_t*) SHR_OFF_TO_PTR(cur->table_new);
+        SHM_off nxt_off = cur->table_new;
+    	  /* printf("[GCOLLE-%02d] gc_free version: %6zu | current version: %6zu\n", GET_ID(collect_not_referenced_only), */
+    	  /* 	 cur->version, hashtable->ht->version); */
+    	  nxt->table_prev = SHM_NULL;
+    	  clht_gc_free(cur);
+    	  cur = nxt;
+        cur_off = nxt_off;
+    	}
 
       hashtable->version_min = cur->version;
       hashtable->ht_oldest = cur_off;

@@ -4,7 +4,7 @@
 
 CFLAGS = -D_GNU_SOURCE -pthread
 
-DEBUG_FLAGS=-Wall -ggdb -g -DDEBUG
+DEBUG_FLAGS=-Wall -ggdb -g -DDEBUG 
 CFLAGS += -O0 -fno-inline 
 
 

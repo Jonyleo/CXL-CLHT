@@ -135,7 +135,11 @@ void clht_shm_term(int node) {
 
 SHM_off clht_shm_alloc(uint64_t size) {
 	SHM_off res = shm_malloc(size);
-  	memset(SHR_OFF_TO_PTR(res), 0, size);
+	void * ptr = SHR_OFF_TO_PTR(res);
+	if(ptr == NULL)
+		return res;
+
+	memset(ptr, 0, size);
 	return res;
 }
 
@@ -165,7 +169,11 @@ SHM_off clht_table_alloc(uint64_t num_buckets) {
 
 	SHM_off off = (SHM_MAPPING_SIZE_ALIGNED + SHM_COMM_SIZE + old_table_end);
 
-  	memset ((char *)SHR_OFF_TO_PTR(off), 0, size);
+  	void * ptr = SHR_OFF_TO_PTR(off);
+	if(ptr == NULL)
+		return off;
+
+	memset(ptr, 0, size);
 
   	return off;
 }
